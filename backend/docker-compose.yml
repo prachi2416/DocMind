@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  # ── DocMind FastAPI Backend ──────────────────────────────────────────
+  docmind-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: docmind-api
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+      - CHROMA_DIR=/app/data/chroma
+      - UPLOAD_DIR=/app/data/uploads
+      - EMBEDDING_MODEL=all-MiniLM-L6-v2
+      - OLLAMA_MODEL=llama3.1:8b
+      - CHUNK_SIZE=512
+      - CHUNK_OVERLAP=50
+    volumes:
+      - docmind_uploads:/app/data/uploads
+      - docmind_chroma:/app/data/chroma
+    depends_on:
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ── Ollama LLM Server ────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: docmind-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # Uncomment for GPU support:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    restart: unless-stopped
+
+  # ── ChromaDB Vector Database ─────────────────────────────────────────
+  # (Optional — DocMind uses embedded ChromaDB by default.
+  #  Uncomment this for a standalone ChromaDB server.)
+  #
+  # chromadb:
+  #   image: chromadb/chroma:latest
+  #   container_name: docmind-chromadb
+  #   ports:
+  #     - "8001:8000"
+  #   volumes:
+  #     - chroma_server_data:/chroma/chroma
+  #   environment:
+  #     - ANONYMIZED_TELEMETRY=FALSE
+  #   restart: unless-stopped
+
+volumes:
+  docmind_uploads:
+  docmind_chroma:
+  ollama_data:
+  # chroma_server_data:
