@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { FileText, MessageSquare, Clock, Zap, TrendingUp, Upload, ArrowRight } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import supabase from "../lib/supabase";
 
 interface Stats {
   totalDocs: number;
@@ -21,64 +22,70 @@ interface DocTypeData {
   type: string;
   count: number;
 }
-
 export default function Dashboard() {
+  useEffect(() => {
+    const checkUser = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      console.log("SESSION:", session);
+      console.log("USER:", session?.user);
+    };
+
+    checkUser();
+  }, []);
   const navigate = useNavigate();
   const [stats, setStats] = useState<Stats>({ totalDocs: 0, activeSessions: 0, queriesToday: 0, avgLatency: 0 });
   const [queryData, setQueryData] = useState<QueryData[]>([]);
   const [docTypes, setDocTypes] = useState<DocTypeData[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [docsRes, convosRes, evalRes] = await Promise.all([
-          fetch('/api/documents'),
-          fetch('/api/conversations'),
-          fetch('/api/eval-metrics'),
-        ]);
-        const docs = docsRes.ok ? await docsRes.json() : [];
-        const convos = convosRes.ok ? await convosRes.json() : [];
-        const evalMetrics = evalRes.ok ? await evalRes.json() : [];
+useEffect(() => {
+  const fetchData = async () => {
+    try {
+      const { data: docs, error: docsError } = await supabase
+        .from("documents")
+        .select("*");
 
-        setStats({
-          totalDocs: docs.length,
-          activeSessions: Math.floor(Math.random() * 20) + 5,
-          queriesToday: convos.length * 12 + Math.floor(Math.random() * 50),
-          avgLatency: evalMetrics.length > 0 ? Number(evalMetrics[0].avg_latency) : 142,
-        });
+      if (docsError) throw docsError;
 
-        setQueryData([
-          { day: 'Mon', queries: 145, latency: 132 },
-          { day: 'Tue', queries: 232, latency: 128 },
-          { day: 'Wed', queries: 198, latency: 145 },
-          { day: 'Thu', queries: 287, latency: 119 },
-          { day: 'Fri', queries: 312, latency: 142 },
-          { day: 'Sat', queries: 89, latency: 155 },
-          { day: 'Sun', queries: 67, latency: 168 },
-        ]);
+      setStats({
+        totalDocs: docs?.length || 0,
+        activeSessions: 1,
+        queriesToday: 0,
+        avgLatency: 142,
+      });
 
-        const typeMap: Record<string, number> = {};
-        docs.forEach((d: any) => { typeMap[d.type] = (typeMap[d.type] || 0) + 1; });
-        const types = Object.keys(typeMap).length > 0
-          ? Object.entries(typeMap).map(([type, count]) => ({ type: type.toUpperCase(), count: count as number }))
-          : [
-              { type: 'PDF', count: 24 },
-              { type: 'MD', count: 18 },
-              { type: 'DOCX', count: 12 },
-              { type: 'TXT', count: 8 },
-              { type: 'CSV', count: 5 },
-            ];
-        setDocTypes(types);
-      } catch (err) {
-        console.error('Dashboard fetch error:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
+      const typeMap: Record<string, number> = {};
 
+      docs?.forEach((d: any) => {
+        typeMap[d.type] = (typeMap[d.type] || 0) + 1;
+      });
+
+      const types = Object.entries(typeMap).map(([type, count]) => ({
+        type: type.toUpperCase(),
+        count,
+      }));
+
+      setDocTypes(types.length ? types : [{ type: "PDF", count: 0 }]);
+
+      setQueryData([
+        { day: "Mon", queries: 10, latency: 120 },
+        { day: "Tue", queries: 15, latency: 130 },
+        { day: "Wed", queries: 12, latency: 140 },
+        { day: "Thu", queries: 18, latency: 110 },
+        { day: "Fri", queries: 20, latency: 125 },
+      ]);
+    } catch (err) {
+      console.error("Dashboard fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchData();
+}, []);
   const statCards = [
     { label: 'Total Documents', value: stats.totalDocs, icon: FileText, color: 'from-blue-500 to-cyan-500', change: '+12%' },
     { label: 'Active Sessions', value: stats.activeSessions, icon: MessageSquare, color: 'from-violet-500 to-purple-500', change: '+5%' },

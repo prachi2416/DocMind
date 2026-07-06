@@ -5,6 +5,7 @@ import {
   CheckCircle, Clock, AlertCircle, Trash2, Loader2, X,
   ArrowRight, Zap, Scissors, Brain, Database
 } from 'lucide-react';
+import supabase from "../lib/supabase";
 
 interface Document {
   id: number;
@@ -72,11 +73,10 @@ export default function Documents() {
 
   const fetchDocuments = useCallback(async () => {
     try {
-      const res = await fetch('/api/documents');
-      if (res.ok) {
-        const data = await res.json();
-        setDocuments(data);
-      }
+      const { data } = await supabase
+        .from("documents")
+        .select("*")
+        .order("uploaded_at", { ascending: false });
     } catch (err) {
       console.error('Fetch documents error:', err);
     } finally {
