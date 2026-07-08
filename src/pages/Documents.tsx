@@ -71,18 +71,22 @@ export default function Documents() {
   const [uploadQueue, setUploadQueue] = useState<UploadItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchDocuments = useCallback(async () => {
-    try {
-      const { data } = await supabase
-        .from("documents")
-        .select("*")
-        .order("uploaded_at", { ascending: false });
-    } catch (err) {
-      console.error('Fetch documents error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+const fetchDocuments = useCallback(async () => {
+  try {
+    const { data, error } = await supabase
+      .from("documents")
+      .select("*")
+      .order("uploaded_at", { ascending: false });
+
+    if (error) throw error;
+
+    setDocuments(data || []);
+  } catch (err) {
+    console.error("Fetch documents error:", err);
+  } finally {
+    setLoading(false);
+  }
+}, []);
 
   useEffect(() => { fetchDocuments(); }, [fetchDocuments]);
 
@@ -90,58 +94,74 @@ export default function Documents() {
     setUploadQueue(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
   }, []);
 
-  const processFile = useCallback(async (item: UploadItem) => {
+const processFile = useCallback(
+  async (item: UploadItem) => {
     const { id, file } = item;
 
-    // Stage 1: Uploading
-    updateUploadItem(id, { stage: 'uploading', progress: 0 });
-
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      // Use XMLHttpRequest for upload progress tracking
-      const uploadResult = await new Promise<{ document_id: number; chunks: number; status: string }>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const pct = Math.round((e.loaded / e.total) * 100);
-            updateUploadItem(id, { progress: pct });
-          }
-        });
-
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              resolve(JSON.parse(xhr.responseText));
-            } catch {
-              reject(new Error('Invalid response from server'));
-            }
-          } else {
-            reject(new Error(xhr.statusText || `Upload failed (${xhr.status})`));
-          }
-        });
-
-        xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
-        xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
-
-        xhr.open('POST', '/api/upload');
-        xhr.send(formData);
+      updateUploadItem(id, {
+        stage: "uploading",
+        progress: 10,
       });
 
-      // Stage 2: Uploaded
-      updateUploadItem(id, { stage: 'uploaded', progress: 100, documentId: uploadResult.document_id });
-      await delay(400);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-      // Stage 3: Processing
-      updateUploadItem(id, { stage: 'processing' });
-      await pollDocumentStatus(uploadResult.document_id, id);
+      if (!user) throw new Error("Please login first");
 
+      const filePath = `${user.id}/${Date.now()}-${file.name}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("documents")
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      updateUploadItem(id, {
+        stage: "uploaded",
+        progress: 40,
+      });
+
+      const { data: publicData } = supabase.storage
+        .from("documents")
+        .getPublicUrl(filePath);
+
+      const { data: docData, error: docError } = await supabase
+        .from("documents")
+        .insert({
+          user_id: user.id,
+          name: file.name,
+          type: file.name.split(".").pop()?.toLowerCase(),
+          size: file.size,
+          status: "indexed",
+          chunks: 0,
+          file_path: filePath,
+          file_url: publicData.publicUrl,
+        })
+        .select()
+        .single();
+
+      if (docError) throw docError;
+
+      updateUploadItem(id, {
+        stage: "indexed",
+        progress: 100,
+        documentId: docData.id,
+      });
+
+      fetchDocuments();
     } catch (err: any) {
-      updateUploadItem(id, { stage: 'failed', error: err.message || 'Upload failed' });
+      console.error(err);
+
+      updateUploadItem(id, {
+        stage: "failed",
+        error: err.message,
+      });
     }
-  }, [updateUploadItem]);
+  },
+  [fetchDocuments, updateUploadItem],
+);
 
   const pollDocumentStatus = useCallback(async (documentId: number, uploadId: string) => {
     const maxPolls = 120; // 2 minutes max
