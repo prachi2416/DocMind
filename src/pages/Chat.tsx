@@ -13,6 +13,8 @@ import {
   WifiOff,
   Loader2,
 } from "lucide-react";
+import supabase from "../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
 
 interface Source {
   document: string;
@@ -40,6 +42,7 @@ interface Conversation {
 }
 
 export default function Chat() {
+  const { user } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvo, setActiveConvo] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -54,6 +57,7 @@ export default function Chat() {
   >("unknown");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -67,13 +71,20 @@ export default function Chat() {
   useEffect(() => {
     const fetchConversations = async () => {
       try {
-        const res = await fetch("/api/conversations");
-        if (res.ok) {
-          const data = await res.json();
-          setConversations(data);
-          if (data.length > 0 && !activeConvo) {
-            setActiveConvo(data[0].id);
-          }
+        if (!user) return;
+
+        const { data, error } = await supabase
+          .from("conversations")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("updated_at", { ascending: false });
+
+        if (error) throw error;
+
+        setConversations(data || []);
+
+        if (data && data.length > 0 && !activeConvo) {
+          setActiveConvo(data[0].id);
         }
       } catch (err) {
         console.error("Fetch conversations error:", err);
@@ -81,55 +92,66 @@ export default function Chat() {
         setLoading(false);
       }
     };
+
     fetchConversations();
-  }, []);
+  }, [user]);
 
   // Fetch messages when active conversation changes
   useEffect(() => {
     if (!activeConvo) return;
+
     const fetchMessages = async () => {
       try {
-        const res = await fetch(`/api/messages?conversation_id=${activeConvo}`);
-        if (res.ok) {
-          const data = await res.json();
-          setMessages(data);
-        }
+        const { data, error } = await supabase
+          .from("messages")
+          .select("*")
+          .eq("conversation_id", activeConvo)
+          .order("created_at", { ascending: true });
+
+        if (error) throw error;
+
+        setMessages(data || []);
       } catch (err) {
         console.error("Fetch messages error:", err);
       }
     };
+
     fetchMessages();
   }, [activeConvo]);
 
-  const createConversation = async () => {
-    try {
-      const res = await fetch("/api/conversations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "New Conversation" }),
-      });
-      if (res.ok) {
-        const convo = await res.json();
-        setConversations((prev) => [convo, ...prev]);
-        setActiveConvo(convo.id);
-        setMessages([]);
-      }
-    } catch (err) {
-      console.error("Create conversation error:", err);
-    }
-  };
+const createConversation = async () => {
+  try {
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from("conversations")
+      .insert({
+        title: "New Conversation",
+        user_id: user.id,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    setConversations((prev) => [data, ...prev]);
+    setActiveConvo(data.id);
+    setMessages([]);
+  } catch (err) {
+    console.error("Create conversation error:", err);
+  }
+};
 
   const deleteConversation = async (id: number) => {
     try {
-      await fetch("/api/conversations", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
-      });
+      await supabase.from("messages").delete().eq("conversation_id", id);
+
+      await supabase.from("conversations").delete().eq("id", id);
+
       setConversations((prev) => prev.filter((c) => c.id !== id));
+
       if (activeConvo === id) {
-        const remaining = conversations.filter((c) => c.id !== id);
-        setActiveConvo(remaining.length > 0 ? remaining[0].id : null);
+        setActiveConvo(null);
         setMessages([]);
       }
     } catch (err) {
@@ -141,11 +163,16 @@ export default function Chat() {
   const updateConversationTitle = useCallback(
     async (convoId: number, title: string) => {
       try {
-        await fetch("/api/conversations", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: convoId, title }),
-        });
+        const { error } = await supabase
+          .from("conversations")
+          .update({
+            title,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", convoId);
+
+        if (error) throw error;
+
         setConversations((prev) =>
           prev.map((c) => (c.id === convoId ? { ...c, title } : c)),
         );
@@ -157,34 +184,35 @@ export default function Chat() {
   );
 
   // Save a message to the database
-  const saveMessage = useCallback(
-    async (
-      conversationId: number,
-      role: string,
-      content: string,
-      sources: Source[],
-    ) => {
-      try {
-        const res = await fetch("/api/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            conversation_id: conversationId,
-            role,
-            content,
-            sources,
-          }),
-        });
-        if (res.ok) {
-          return await res.json();
-        }
-      } catch (err) {
-        console.error("Save message error:", err);
-      }
+const saveMessage = useCallback(
+  async (
+    conversationId: number,
+    role: string,
+    content: string,
+    sources: Source[],
+  ) => {
+    try {
+      const { data, error } = await supabase
+        .from("messages")
+        .insert({
+          conversation_id: conversationId,
+          role,
+          content,
+          sources,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return data;
+    } catch (err) {
+      console.error("Save message error:", err);
       return null;
-    },
-    [],
-  );
+    }
+  },
+  [],
+);
 
   // Animate text appearing character by character for a natural typing effect
   const animateText = useCallback((text: string, onDone: () => void) => {
@@ -273,11 +301,16 @@ export default function Chat() {
       abortControllerRef.current = controller;
 
       try {
-        const res = await fetch("/api/query", {
+        const response = await fetch("http://localhost:8000/api/query", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question, conversation_id: conversationId }),
-          signal: controller.signal,
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            question: input,
+            conversation_id: activeConvo,
+            top_k: 5,
+          }),
         });
 
         // Handle non-OK responses
@@ -509,7 +542,7 @@ export default function Chat() {
         </div>
         <div className="flex-1 overflow-y-auto px-2 space-y-1">
           {filteredConversations.map((convo) => (
-            <button
+            <div
               key={convo.id}
               onClick={() => setActiveConvo(convo.id)}
               className={
@@ -523,7 +556,7 @@ export default function Chat() {
               <span className="text-sm text-slate-300 truncate flex-1">
                 {convo.title}
               </span>
-              <button
+              <div
                 onClick={(e) => {
                   e.stopPropagation();
                   deleteConversation(convo.id);
@@ -531,8 +564,8 @@ export default function Chat() {
                 className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/10 transition-all"
               >
                 <Trash2 className="w-3 h-3 text-slate-500" />
-              </button>
-            </button>
+              </div>
+            </div>
           ))}
           {filteredConversations.length === 0 && (
             <p className="text-sm text-slate-500 text-center py-8">
