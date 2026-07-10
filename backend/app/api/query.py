@@ -24,7 +24,7 @@ router = APIRouter()
 
 class QueryRequest(BaseModel):
     question: str = Field(..., min_length=1, description="User question")
-    conversation_id: int | None = Field(None, description="Optional conversation ID")
+    conversation_id: str | None = Field(None, description="Optional conversation ID")
     top_k: int = Field(default=5, ge=1, le=20, description="Number of chunks to retrieve")
 
 
@@ -38,7 +38,7 @@ class SourceCitation(BaseModel):
 class QueryResponse(BaseModel):
     answer: str
     sources: list[SourceCitation]
-    conversation_id: int | None = None
+    conversation_id: str | None = None
 
 
 @router.post(

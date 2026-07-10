@@ -25,13 +25,7 @@ class RetrievalResult:
 
 
 class Retriever:
-    """Retrieve relevant document chunks for a query.
-
-    Args:
-        store: ChromaDB vector store instance.
-        top_k: Number of chunks to retrieve.
-        min_score: Minimum relevance score threshold.
-    """
+    """Retrieve relevant document chunks for a query."""
 
     def __init__(
         self,
@@ -71,13 +65,29 @@ class Retriever:
 
         logger.info("Raw results returned: %d", len(ids))
 
+        # Remove duplicate page results
+        seen: set[str] = set()
+
         for doc_id, doc, dist, meta in zip(
             ids,
             documents,
             distances,
             metadatas,
         ):
-            # ChromaDB cosine distance → similarity score
+            meta = meta or {}
+
+            filename = meta.get("filename", "unknown")
+            page = meta.get("page", 0)
+
+            key = f"{filename}_{page}"
+
+            if key in seen:
+                logger.debug("Skipping duplicate result: %s", key)
+                continue
+
+            seen.add(key)
+
+            # Chroma cosine distance → similarity score
             score = max(0.0, 1.0 - float(dist))
 
             logger.debug(
@@ -87,7 +97,6 @@ class Retriever:
                 score,
             )
 
-            # Filter low-quality matches
             if score < self.min_score:
                 continue
 
@@ -95,17 +104,15 @@ class Retriever:
                 RetrievalResult(
                     text=doc,
                     score=score,
-                    metadata=meta or {},
+                    metadata=meta,
                 )
             )
 
-        # Sort highest score first
         results.sort(key=lambda x: x.score, reverse=True)
 
         logger.info(
-            "Retrieved %d result(s) after filtering (threshold=%.2f)",
+            "Retrieved %d result(s) after filtering",
             len(results),
-            self.min_score,
         )
 
         return results

@@ -23,9 +23,16 @@ interface Source {
   page: number;
 }
 
+interface Conversation {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
 interface Message {
-  id?: number;
-  conversation_id: number;
+  id?: string;
+  conversation_id: string;
   role: string;
   content: string;
   sources: Source[];
@@ -34,17 +41,10 @@ interface Message {
   retryable?: boolean;
 }
 
-interface Conversation {
-  id: number;
-  title: string;
-  created_at: string;
-  updated_at: string;
-}
-
 export default function Chat() {
   const { user } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeConvo, setActiveConvo] = useState<number | null>(null);
+  const [activeConvo, setActiveConvo] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -142,7 +142,7 @@ const createConversation = async () => {
   }
 };
 
-  const deleteConversation = async (id: number) => {
+  const deleteConversation = async (id: string) => {
     try {
       await supabase.from("messages").delete().eq("conversation_id", id);
 
@@ -161,7 +161,7 @@ const createConversation = async () => {
 
   // Update conversation title from first user message
   const updateConversationTitle = useCallback(
-    async (convoId: number, title: string) => {
+    async (convoId: string, title: string) => {
       try {
         const { error } = await supabase
           .from("conversations")
@@ -186,7 +186,7 @@ const createConversation = async () => {
   // Save a message to the database
 const saveMessage = useCallback(
   async (
-    conversationId: number,
+    conversationId: string,
     role: string,
     content: string,
     sources: Source[],
@@ -288,7 +288,7 @@ const saveMessage = useCallback(
 
   // Core query function — calls the API and handles the response
   const queryBackend = useCallback(
-    async (question: string, conversationId: number, retryCount = 0) => {
+    async (question: string, conversationId: string, retryCount = 0) => {
       setIsStreaming(true);
       setStreamingText("");
       setStreamingSources([]);
@@ -301,51 +301,63 @@ const saveMessage = useCallback(
       abortControllerRef.current = controller;
 
       try {
-        const response = await fetch("http://localhost:8000/api/query", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
+        console.log(
+          "REQUEST BODY",
+          JSON.stringify({
             question: input,
-            conversation_id: activeConvo,
+            conversation_id: conversationId,
             top_k: 5,
           }),
-        });
+        );
+       const response = await fetch("http://127.0.0.1:8000/api/query", {
+         method: "POST",
+         headers: {
+           "Content-Type": "application/json",
+         },
+         body: JSON.stringify({
+           question,
+           conversation_id: conversationId,
+           top_k: 5,
+         }),
+       });
+              const data = await response.json();
+              console.log("API RESPONSE:", data);
+              const answer: string = data.answer || "";
+              const sources: Source[] = data.sources || [];
 
         // Handle non-OK responses
-        if (!res.ok) {
+        if (!response.ok) {
           let errorData: any = {};
           try {
-            errorData = await res.json();
+            errorData = await response.json();
           } catch {
             /* ignore parse error */
           }
 
           const isBackendDown =
-            errorData.backend_unavailable || res.status === 503;
+            errorData.backend_unavailable || response.status === 503;
 
           if (isBackendDown) {
             setBackendStatus("unavailable");
           }
 
           // Auto-retry up to 2 times on transient errors
-          if (retryCount < 2 && (res.status >= 500 || res.status === 0)) {
+          if (retryCount < 2 && (response.status >= 500 || response.status === 0)) {
             await new Promise((r) => setTimeout(r, 1000 * (retryCount + 1)));
             return queryBackend(question, conversationId, retryCount + 1);
           }
 
-          const errorMsg = errorData.error || `Request failed (${res.status})`;
+          const errorMsg = errorData.error || `Request failed (${response.status})`;
           throw new Error(errorMsg);
         }
 
         setBackendStatus("available");
 
-        const contentType = res.headers.get("content-type") || "";
+        const contentType = response.headers.get("content-type") || "";
 
         // --- Streaming response (SSE) ---
-        if (contentType.includes("text/event-stream") && res.body) {
-          const reader = res.body.getReader();
+        if (contentType.includes("text/event-stream") && response.body) {
+          const reader = response.body.getReader();
           let fullText = "";
           let finalSources: Source[] = [];
 
@@ -391,9 +403,7 @@ const saveMessage = useCallback(
         }
 
         // --- JSON response ---
-        const data = await res.json();
-        const answer: string = data.answer || "";
-        const sources: Source[] = data.sources || [];
+
 
         // Animate the answer text for a natural feel
         const animInterval = animateText(answer, async () => {
@@ -450,24 +460,28 @@ const saveMessage = useCallback(
     let convoId = activeConvo;
 
     // Auto-create conversation if none is active
-    if (!convoId) {
-      try {
-        const res = await fetch("/api/conversations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: input.trim().slice(0, 50) }),
-        });
-        if (res.ok) {
-          const convo = await res.json();
-          setConversations((prev) => [convo, ...prev]);
-          setActiveConvo(convo.id);
-          convoId = convo.id;
-        }
-      } catch (err) {
-        console.error("Auto-create conversation error:", err);
-        return;
-      }
-    }
+if (!convoId) {
+  if (!user) return;
+
+  const { data, error } = await supabase
+    .from("conversations")
+    .insert({
+      title: input.trim().slice(0, 50),
+      user_id: user.id,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  setConversations((prev) => [data, ...prev]);
+  setActiveConvo(data.id);
+
+  convoId = data.id;
+}
 
     if (!convoId) return;
 
