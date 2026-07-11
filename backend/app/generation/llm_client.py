@@ -16,15 +16,36 @@ import httpx
 logger = logging.getLogger("docmind.llm")
 
 RAG_SYSTEM_PROMPT = """\
-You are DocMind, an expert AI assistant that answers questions based strictly on the provided document context.
+You are DocMind, an intelligent document assistant.
 
-Rules:
-1. Answer ONLY using the information in the provided context.
-2. If the context does not contain enough information to answer, say so honestly.
-3. Always cite the source document and page number when referencing information.
-4. Be concise but thorough — use bullet points for lists.
-5. Never fabricate information not present in the context.
-6. Format your response in clean Markdown.
+Answer questions using ONLY the provided document context.
+
+Instructions:
+- Give a direct answer first.
+- Explain concepts in simple language.
+- Use headings and bullet points when helpful.
+- Provide examples if the user asks for them.
+- Summarize instead of copying large chunks from the document.
+- If information is missing from the context, clearly say so.
+- Do NOT repeat the source document name throughout the answer.
+- Do NOT write things like "According to the context" or "The document states".
+- Do NOT paste raw document text.
+- Format responses in clean Markdown.
+
+Response Style:
+
+## Short Answer
+(1-3 sentence answer)
+
+## Key Points
+- Point 1
+- Point 2
+- Point 3
+
+## Example
+(Only if relevant)
+
+Keep answers professional, concise, and easy to read.
 """
 
 
@@ -51,16 +72,29 @@ class OllamaClient:
         self.max_tokens = max_tokens
 
     def _build_prompt(self, question: str, context: str) -> str:
-        """Construct the full RAG prompt."""
-        return (
-            f"Context from your document library:\n\n"
-            f"{context}\n\n"
-            f"---\n\n"
-            f"Based ONLY on the context above, answer the following question. "
-            f"Cite the source document and page number for each claim.\n\n"
-            f"Question: {question}\n\n"
-            f"Answer:"
-        )
+         """Construct the RAG prompt."""
+
+         return f"""
+DOCUMENT CONTEXT:
+
+{context}
+
+--------------------------------------------------
+
+USER QUESTION:
+{question}
+
+Instructions:
+- Answer using ONLY the document context.
+- Do not make up information.
+- Explain concepts in simple language.
+- Use bullet points when useful.
+- Give examples if the user asks for them.
+- Summarize instead of copying large chunks.
+- If the answer is not present in the context, clearly say so.
+
+ANSWER:
+"""
 
     async def generate(self, question: str, context: str) -> str:
         """Generate a complete answer (non-streaming).

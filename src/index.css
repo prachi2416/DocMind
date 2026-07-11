@@ -113,3 +113,50 @@ body {
 .animate-spin-slow {
   animation: spin-slow 3s linear infinite;
 }
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  font-weight: 700;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.markdown h1 {
+  font-size: 1.5rem;
+}
+
+.markdown h2 {
+  font-size: 1.25rem;
+}
+
+.markdown h3 {
+  font-size: 1.1rem;
+}
+
+.markdown p {
+  margin-bottom: 0.75rem;
+}
+
+.markdown ul,
+.markdown ol {
+  margin-left: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.markdown li {
+  margin-bottom: 0.25rem;
+}
+
+.markdown code {
+  background: rgba(255,255,255,0.08);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.markdown pre {
+  background: rgba(255,255,255,0.05);
+  padding: 12px;
+  border-radius: 12px;
+  overflow-x: auto;
+  margin: 12px 0;
+}

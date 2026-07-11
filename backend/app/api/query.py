@@ -51,18 +51,30 @@ async def query_documents(
     request: Request,
 ) -> QueryResponse:
     """Retrieve relevant chunks and generate an answer."""
+
     store = request.app.state.store
 
     try:
         retriever = Retriever(store=store, top_k=body.top_k)
         results = await retriever.retrieve(body.question)
+
+        # Keep only top 3 results
+        results = sorted(
+            results,
+            key=lambda r: r.score,
+            reverse=True
+        )[:3]
+
     except Exception as exc:
         logger.exception("Retrieval failed")
-        raise HTTPException(status_code=500, detail=f"Retrieval error: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Retrieval error: {exc}"
+        )
 
     if not results:
         return QueryResponse(
-            answer="I couldn't find any relevant documents to answer your question. Please try uploading more documents or rephrasing your query.",
+            answer="I couldn't find any relevant documents to answer your question.",
             sources=[],
             conversation_id=body.conversation_id,
         )
@@ -70,26 +82,55 @@ async def query_documents(
     context_parts: list[str] = []
     sources: list[SourceCitation] = []
 
+    seen_pages = set()
+
     for r in results:
-        context_parts.append(f"[Source: {r.metadata.get('filename', 'unknown')}, Page {r.metadata.get('page', 0)}]\n{r.text}")
-        sources.append(SourceCitation(
-            document=r.metadata.get("filename", "unknown"),
-            excerpt=r.text[:300],
-            score=round(r.score, 4),
-            page=r.metadata.get("page", 0),
-        ))
+        key = (
+            r.metadata.get("filename", ""),
+            r.metadata.get("page", 0),
+        )
+
+        if key in seen_pages:
+            continue
+
+        seen_pages.add(key)
+
+        context_parts.append(
+            f"[Source: {r.metadata.get('filename', 'unknown')}, "
+            f"Page {r.metadata.get('page', 0)}]\n{r.text}"
+        )
+
+        sources.append(
+            SourceCitation(
+                document=r.metadata.get("filename", "unknown"),
+                excerpt=r.text[:300],
+                score=round(r.score, 4),
+                page=r.metadata.get("page", 0),
+            )
+        )
 
     context = "\n\n".join(context_parts)
 
     try:
         llm = OllamaClient(
             model=os.getenv("OLLAMA_MODEL", "llama3.2:3b"),
-            base_url=os.getenv("OLLAMA_URL", "http://localhost:11434"),
+            base_url=os.getenv(
+                "OLLAMA_URL",
+                "http://localhost:11434",
+            ),
         )
-        answer = await llm.generate(question=body.question, context=context)
+
+        answer = await llm.generate(
+            question=body.question,
+            context=context,
+        )
+
     except Exception as exc:
         logger.exception("Generation failed")
-        raise HTTPException(status_code=502, detail=f"LLM generation error: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"LLM generation error: {exc}"
+        )
 
     return QueryResponse(
         answer=answer,
@@ -107,43 +148,83 @@ async def query_stream(
     request: Request,
 ) -> StreamingResponse:
     """Retrieve relevant chunks and stream the generated answer."""
+
     store = request.app.state.store
 
     try:
         retriever = Retriever(store=store, top_k=body.top_k)
         results = await retriever.retrieve(body.question)
+
+        results = sorted(
+            results,
+            key=lambda r: r.score,
+            reverse=True
+        )[:3]
+
     except Exception as exc:
         logger.exception("Retrieval failed")
-        raise HTTPException(status_code=500, detail=f"Retrieval error: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Retrieval error: {exc}"
+        )
 
     context_parts: list[str] = []
     sources: list[dict] = []
 
+    seen_pages = set()
+
     for r in results:
-        context_parts.append(f"[Source: {r.metadata.get('filename', 'unknown')}, Page {r.metadata.get('page', 0)}]\n{r.text}")
-        sources.append({
-            "document": r.metadata.get("filename", "unknown"),
-            "excerpt": r.text[:300],
-            "score": round(r.score, 4),
-            "page": r.metadata.get("page", 0),
-        })
+        key = (
+            r.metadata.get("filename", ""),
+            r.metadata.get("page", 0),
+        )
+
+        if key in seen_pages:
+            continue
+
+        seen_pages.add(key)
+
+        context_parts.append(
+            f"[Source: {r.metadata.get('filename', 'unknown')}, "
+            f"Page {r.metadata.get('page', 0)}]\n{r.text}"
+        )
+
+        sources.append(
+            {
+                "document": r.metadata.get("filename", "unknown"),
+                "excerpt": r.text[:300],
+                "score": round(r.score, 4),
+                "page": r.metadata.get("page", 0),
+            }
+        )
 
     context = "\n\n".join(context_parts)
 
     llm = OllamaClient(
         model=os.getenv("OLLAMA_MODEL", "llama3.2:3b"),
-        base_url=os.getenv("OLLAMA_URL", "http://localhost:11434"),
+        base_url=os.getenv(
+            "OLLAMA_URL",
+            "http://localhost:11434",
+        ),
     )
 
     async def event_generator() -> AsyncIterator[str]:
+
         yield f"data: {json.dumps({'sources': sources})}\n\n"
 
         try:
-            async for token in llm.stream(question=body.question, context=context):
+            async for token in llm.stream(
+                question=body.question,
+                context=context,
+            ):
                 yield f"data: {json.dumps({'token': token})}\n\n"
+
         except Exception as exc:
             logger.exception("Streaming error")
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+
+            yield (
+                f"data: {json.dumps({'error': str(exc)})}\n\n"
+            )
 
         yield "data: [DONE]\n\n"
 

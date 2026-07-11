@@ -15,6 +15,11 @@ import {
 } from "lucide-react";
 import supabase from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+import "highlight.js/styles/github-dark.css";
+
 
 interface Source {
   document: string;
@@ -665,9 +670,11 @@ if (!convoId) {
                               : "glass text-slate-200")
                           }
                         >
-                          <p className="text-sm whitespace-pre-wrap leading-relaxed">
-                            {msg.content}
-                          </p>
+                          <div className="markdown text-sm leading-relaxed">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {msg.content}
+                            </ReactMarkdown>
+                          </div>
                         </div>
                         {msg.role === "assistant" &&
                           msg.sources &&
@@ -715,10 +722,12 @@ if (!convoId) {
                   <div className="max-w-[80%]">
                     <div className="glass rounded-2xl px-5 py-3">
                       {streamingText ? (
-                        <p className="text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">
-                          {streamingText}
+                        <div className="markdown text-sm leading-relaxed">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {streamingText}
+                          </ReactMarkdown>
                           <span className="typing-cursor" />
-                        </p>
+                        </div>
                       ) : (
                         <div className="flex items-center gap-2">
                           <div className="flex gap-1">

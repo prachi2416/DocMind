@@ -11,13 +11,17 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.1",
+    "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.2.1",
     "framer-motion": "^12.35.0",
     "lucide-react": "^0.577.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.13.1",
     "recharts": "^3.9.1",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
     "tailwindcss": "^4.2.1"
   },
   "devDependencies": {
