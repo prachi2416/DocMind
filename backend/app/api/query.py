@@ -24,8 +24,16 @@ router = APIRouter()
 
 class QueryRequest(BaseModel):
     question: str = Field(..., min_length=1, description="User question")
-    conversation_id: str | None = Field(None, description="Optional conversation ID")
-    top_k: int = Field(default=5, ge=1, le=20, description="Number of chunks to retrieve")
+    conversation_id: str | None = Field(
+        None,
+        description="Optional conversation ID",
+    )
+    top_k: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Number of chunks to retrieve",
+    )
 
 
 class SourceCitation(BaseModel):
@@ -39,6 +47,18 @@ class QueryResponse(BaseModel):
     answer: str
     sources: list[SourceCitation]
     conversation_id: str | None = None
+
+
+@router.get("/debug")
+async def debug(request: Request):
+    store = request.app.state.store
+
+    try:
+        count = store.collection.count()
+    except Exception as exc:
+        return {"error": str(exc)}
+
+    return {"count": count}
 
 
 @router.post(
@@ -55,21 +75,39 @@ async def query_documents(
     store = request.app.state.store
 
     try:
-        retriever = Retriever(store=store, top_k=body.top_k)
+        retriever = Retriever(
+            store=store,
+            top_k=body.top_k,
+        )
+
         results = await retriever.retrieve(body.question)
 
-        # Keep only top 3 results
+        logger.info("=" * 80)
+        logger.info("QUESTION = %s", body.question)
+        logger.info("RESULT COUNT = %s", len(results))
+
+        for i, r in enumerate(results):
+            logger.info(
+                "RESULT %s | score=%s | file=%s | page=%s",
+                i,
+                r.score,
+                r.metadata.get("filename"),
+                r.metadata.get("page"),
+            )
+
+        logger.info("=" * 80)
+
         results = sorted(
             results,
             key=lambda r: r.score,
-            reverse=True
+            reverse=True,
         )[:3]
 
     except Exception as exc:
         logger.exception("Retrieval failed")
         raise HTTPException(
             status_code=500,
-            detail=f"Retrieval error: {exc}"
+            detail=f"Retrieval error: {exc}",
         )
 
     if not results:
@@ -82,7 +120,7 @@ async def query_documents(
     context_parts: list[str] = []
     sources: list[SourceCitation] = []
 
-    seen_pages = set()
+    seen_pages: set[tuple[str, int]] = set()
 
     for r in results:
         key = (
@@ -113,7 +151,10 @@ async def query_documents(
 
     try:
         llm = OllamaClient(
-            model=os.getenv("OLLAMA_MODEL", "llama3.2:3b"),
+            model=os.getenv(
+                "OLLAMA_MODEL",
+                "llama3.2:3b",
+            ),
             base_url=os.getenv(
                 "OLLAMA_URL",
                 "http://localhost:11434",
@@ -129,7 +170,7 @@ async def query_documents(
         logger.exception("Generation failed")
         raise HTTPException(
             status_code=502,
-            detail=f"LLM generation error: {exc}"
+            detail=f"LLM generation error: {exc}",
         )
 
     return QueryResponse(
@@ -152,26 +193,30 @@ async def query_stream(
     store = request.app.state.store
 
     try:
-        retriever = Retriever(store=store, top_k=body.top_k)
+        retriever = Retriever(
+            store=store,
+            top_k=body.top_k,
+        )
+
         results = await retriever.retrieve(body.question)
 
         results = sorted(
             results,
             key=lambda r: r.score,
-            reverse=True
+            reverse=True,
         )[:3]
 
     except Exception as exc:
         logger.exception("Retrieval failed")
         raise HTTPException(
             status_code=500,
-            detail=f"Retrieval error: {exc}"
+            detail=f"Retrieval error: {exc}",
         )
 
     context_parts: list[str] = []
     sources: list[dict] = []
 
-    seen_pages = set()
+    seen_pages: set[tuple[str, int]] = set()
 
     for r in results:
         key = (
@@ -201,7 +246,10 @@ async def query_stream(
     context = "\n\n".join(context_parts)
 
     llm = OllamaClient(
-        model=os.getenv("OLLAMA_MODEL", "llama3.2:3b"),
+        model=os.getenv(
+            "OLLAMA_MODEL",
+            "llama3.2:3b",
+        ),
         base_url=os.getenv(
             "OLLAMA_URL",
             "http://localhost:11434",
@@ -209,7 +257,6 @@ async def query_stream(
     )
 
     async def event_generator() -> AsyncIterator[str]:
-
         yield f"data: {json.dumps({'sources': sources})}\n\n"
 
         try:

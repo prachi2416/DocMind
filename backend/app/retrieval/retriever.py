@@ -30,8 +30,8 @@ class Retriever:
     def __init__(
         self,
         store: ChromaStore,
-        top_k: int = 3,
-        min_score: float = 0.25,
+        top_k: int = 5,
+        min_score: float = 0.0,
     ) -> None:
         self.store = store
         self.top_k = top_k
@@ -39,22 +39,17 @@ class Retriever:
         self.embedder = Embedder()
 
     async def retrieve(self, query: str) -> list[RetrievalResult]:
-        """Embed the query and search ChromaDB."""
+        logger.info("=" * 80)
+        logger.info("QUERY = %s", query)
 
-        logger.info(
-            "Retrieving top-%d results for query: '%s'",
-            self.top_k,
-            query[:100],
-        )
-
-        # Generate query embedding
         query_embedding = self.embedder.embed_query(query)
 
-        # Search ChromaDB
         raw_results = await self.store.query(
             query_embedding=query_embedding.tolist(),
             n_results=self.top_k,
         )
+
+        logger.info("RAW RESULTS = %s", raw_results)
 
         results: list[RetrievalResult] = []
 
@@ -63,9 +58,8 @@ class Retriever:
         distances = raw_results.get("distances", [[]])[0]
         metadatas = raw_results.get("metadatas", [[]])[0]
 
-        logger.info("Raw results returned: %d", len(ids))
+        logger.info("Returned %s results from Chroma", len(ids))
 
-        # Remove duplicate page results
         seen: set[str] = set()
 
         for doc_id, doc, dist, meta in zip(
@@ -82,23 +76,19 @@ class Retriever:
             key = f"{filename}_{page}"
 
             if key in seen:
-                logger.debug("Skipping duplicate result: %s", key)
                 continue
 
             seen.add(key)
 
-            # Chroma cosine distance → similarity score
             score = max(0.0, 1.0 - float(dist))
 
-            logger.debug(
-                "Result | id=%s | distance=%.4f | score=%.4f",
+            logger.info(
+                "ID=%s PAGE=%s DIST=%.4f SCORE=%.4f",
                 doc_id,
-                dist,
+                page,
+                float(dist),
                 score,
             )
-
-            if score < self.min_score:
-                continue
 
             results.append(
                 RetrievalResult(
@@ -108,11 +98,16 @@ class Retriever:
                 )
             )
 
-        results.sort(key=lambda x: x.score, reverse=True)
+        results.sort(
+            key=lambda x: x.score,
+            reverse=True,
+        )
 
         logger.info(
-            "Retrieved %d result(s) after filtering",
+            "FINAL RESULTS AFTER DEDUPE = %s",
             len(results),
         )
+
+        logger.info("=" * 80)
 
         return results

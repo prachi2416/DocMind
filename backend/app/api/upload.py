@@ -88,9 +88,9 @@ async def upload_document(
 
         # 2. Chunk
         chunker = TextChunker(
-            chunk_size=int(os.getenv("CHUNK_SIZE", "512")),
-            chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "50")),
-        )
+    chunk_size=int(os.getenv("CHUNK_SIZE", "1000")),
+    chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "200")),
+)
         chunks = chunker.split(pages, metadata={"document_id": doc_id, "filename": file.filename})
         if not chunks:
             raise ValueError("Chunking produced zero chunks")

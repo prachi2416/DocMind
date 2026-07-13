@@ -309,7 +309,7 @@ const saveMessage = useCallback(
         console.log(
           "REQUEST BODY",
           JSON.stringify({
-            question: input,
+            question: question,
             conversation_id: conversationId,
             top_k: 5,
           }),
@@ -506,7 +506,8 @@ if (!convoId) {
         userMsg.length > 50 ? userMsg.slice(0, 47) + "..." : userMsg;
       updateConversationTitle(convoId, title);
     }
-
+console.log("INPUT STATE =", input);
+console.log("QUESTION SENT =", userMsg);
     // Query the backend
     await queryBackend(userMsg, convoId);
   };
