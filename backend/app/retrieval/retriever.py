@@ -48,7 +48,10 @@ class Retriever:
             query_embedding=query_embedding.tolist(),
             n_results=self.top_k,
         )
-
+        print("=" * 60)
+        print("QUERY =", query)
+        print(raw_results)
+        print("=" * 60)
         logger.info("RAW RESULTS = %s", raw_results)
 
         results: list[RetrievalResult] = []

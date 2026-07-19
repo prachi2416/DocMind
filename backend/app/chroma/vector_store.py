@@ -55,6 +55,11 @@ class ChromaStore:
         )
 
         count = self._collection.count()
+        print("=" * 60)
+        print("CHROMA COLLECTION :", self.collection_name)
+        print("CHROMA DIRECTORY  :", self.persist_dir)
+        print("TOTAL VECTORS     :", count)
+        print("=" * 60)
         logger.info(
             "ChromaDB ready: collection='%s', %d existing vectors, dir='%s'",
             self.collection_name, count, self.persist_dir,

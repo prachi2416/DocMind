@@ -7,18 +7,18 @@ the resulting document ID and chunk count.
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import uuid
-import logging
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
-from app.ingestion.loader import DocumentLoader
 from app.ingestion.chunker import TextChunker
 from app.ingestion.embedder import Embedder
+from app.ingestion.loader import DocumentLoader
 
 logger = logging.getLogger("docmind.upload")
 router = APIRouter()
@@ -26,7 +26,7 @@ router = APIRouter()
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./data/uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-ALLOWED_EXTENSIONS: set[str] = {"pdf", "docx", "txt", "md", "markdown"}
+ALLOWED_EXTENSIONS = {"pdf", "docx", "txt", "md", "markdown"}
 
 
 class UploadResponse(BaseModel):
@@ -44,72 +44,106 @@ class UploadError(BaseModel):
 @router.post(
     "/upload",
     response_model=UploadResponse,
-    responses={400: {"model": UploadError}, 500: {"model": UploadError}},
-    summary="Upload and index a document",
+    responses={
+        400: {"model": UploadError},
+        500: {"model": UploadError},
+    },
 )
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
 ) -> UploadResponse:
-    """Upload a document, chunk it, embed the chunks, and store in ChromaDB."""
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
 
     ext = Path(file.filename).suffix.lstrip(".").lower()
+
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type '.{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+            detail=f"Unsupported file type: {ext}",
         )
 
     doc_id = str(uuid.uuid4())
+
     save_path = UPLOAD_DIR / f"{doc_id}_{file.filename}"
 
     try:
-        with save_path.open("wb") as buf:
-            shutil.copyfileobj(file.file, buf)
-    except Exception as exc:
-        logger.exception("Failed to save uploaded file")
-        raise HTTPException(status_code=500, detail=f"File save error: {exc}")
+        with save_path.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
     finally:
         await file.close()
-
-    logger.info("Saved upload '%s' → %s", file.filename, save_path)
 
     store = request.app.state.store
 
     try:
-        # 1. Load
+        # -------------------------
+        # Load
+        # -------------------------
         loader = DocumentLoader()
+
         pages = await loader.load(save_path, ext)
+
         if not pages:
-            raise ValueError("No text content extracted from document")
+            raise ValueError("No text extracted")
 
-        # 2. Chunk
+        # -------------------------
+        # Chunk
+        # -------------------------
         chunker = TextChunker(
-    chunk_size=int(os.getenv("CHUNK_SIZE", "1000")),
-    chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "200")),
-)
-        chunks = chunker.split(pages, metadata={"document_id": doc_id, "filename": file.filename})
+            chunk_size=int(os.getenv("CHUNK_SIZE", "1000")),
+            chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "200")),
+        )
+
+        chunks = chunker.split(
+            pages,
+            metadata={
+                "document_id": doc_id,
+                "filename": file.filename,
+            },
+        )
+
         if not chunks:
-            raise ValueError("Chunking produced zero chunks")
+            raise ValueError("No chunks created")
 
-        # 3. Embed
+        # -------------------------
+        # Embed
+        # -------------------------
         embedder = Embedder()
-        embeddings = embedder.embed([c.text for c in chunks])
 
-        # 4. Store
+        embeddings = embedder.embed(
+            [c.text for c in chunks]
+        )
+
+        # -------------------------
+        # Store
+        # -------------------------
         await store.add_documents(
-            ids=[f"{doc_id}_{i}" for i in range(len(chunks))],
-            documents=[c.text for c in chunks],
+            ids=[
+                f"{doc_id}_{i}"
+                for i in range(len(chunks))
+            ],
+            documents=[
+                c.text
+                for c in chunks
+            ],
             embeddings=embeddings.tolist(),
-            metadatas=[c.metadata for c in chunks],
+            metadatas=[
+                c.metadata
+                for c in chunks
+            ],
         )
 
-        logger.info(
-            "Ingested '%s': %d pages → %d chunks → stored", file.filename, len(pages), len(chunks)
-        )
+        # -------------------------
+        # Debug prints
+        # -------------------------
+        print("=" * 60)
+        print("UPLOAD SUCCESS")
+        print("FILE :", file.filename)
+        print("CHUNKS :", len(chunks))
+        print("TOTAL CHUNKS IN CHROMA :", store.collection.count())
+        print("=" * 60)
 
         return UploadResponse(
             document_id=doc_id,
@@ -119,7 +153,12 @@ async def upload_document(
         )
 
     except Exception as exc:
-        logger.exception("Ingestion failed for '%s'", file.filename)
+        logger.exception("Upload failed")
+
         if save_path.exists():
             save_path.unlink()
-        raise HTTPException(status_code=500, detail=f"Ingestion error: {exc}")
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        )
